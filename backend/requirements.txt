@@ -1,0 +1,18 @@
+fastapi
+uvicorn
+pydantic
+python-multipart
+# ML Dependencies
+torch
+transformers
+peft
+accelerate
+protobuf
+sentencepiece
+sentencepiece
+python-dotenv
+groq
+chromadb
+sentence-transformers
+pypdf
+langchain-text-splitters

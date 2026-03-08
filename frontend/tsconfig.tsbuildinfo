@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/blurtext.tsx","./src/components/chatinput.tsx","./src/components/messagebubble.tsx","./src/lib/utils.ts","./src/types/react-spring.d.ts"],"errors":true,"version":"5.9.3"}

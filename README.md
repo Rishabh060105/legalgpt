@@ -25,7 +25,7 @@ The backend acts as the RAG orchestration layer. It is responsible for parsing d
 * **Framework**: FastAPI (Python) for asynchronous, high-performance API routes.
 * **Vector Database**: ChromaDB (Running locally with persistent storage backing in `./chroma_db`).
 * **LLM Engine**: Llama-3-8B (via Groq API) for ultra-fast inference.
-* **Embeddings**: `BAAI/bge-large-en-v1.5` (via Hugging Face) for state-of-the-art semantic comprehension of legal text.
+* **Embeddings**: `all-MiniLM-L6-v2` (via Hugging Face Sentence Transformers) for highly efficient semantic comprehension of legal text.
 
 ### 🔄 The RAG Workflow (How it works)
 1. **Ingestion (`ingest.py`)**: Legal PDFs are parsed. Text is extracted, chunked securely while respecting paragraph boundaries, embedded via HuggingFace models, and stored seamlessly in the local ChromaDB vector store.

@@ -5,8 +5,7 @@
 
 > Notebook analysis summary:
 ```
-Notebook path: /mnt/data/Cognitivelab_assignment_notebook_Rishabh_Jain-3.ipynb
-Total cells: 24
+Notebook path: /Users/rishabhjain/Desktop/legalgpt/Cognitivelab_assignment_notebook_Rishabh_Jain-3.ipynb
 Found markdown headings (top 10):
   - # CognitiveLab Research Internship Assignment
   - ## Synthetic Data Generation and LLM Fine-tuning
@@ -31,8 +30,6 @@ Top-level functions detected: generate_qa_batch, format_dataset_entry, pre_forma
 - Source-citation and confidence levels for each answer.
 - Conversation history, follow-up question support and clarifying-question prompts.
 - Feedback loop for users to mark answers as **helpful / not helpful** and to flag incorrect legal content.
-- Strong privacy, logging, and audit trail for regulatory compliance.
-
 ---
 
 ## High-level Architecture

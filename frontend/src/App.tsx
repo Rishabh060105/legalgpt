@@ -3,12 +3,13 @@ import { ChatInput } from './components/ChatInput'
 import { MessageBubble } from './components/MessageBubble'
 import { motion, AnimatePresence } from 'framer-motion'
 import { BlurText } from './components/BlurText'
+import { consumeSseBuffer } from './lib/sse'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  sources?: { id: string, title: string, url: string, excerpt: string }[]
+  sources?: { id: string, title: string, url: string, excerpt: string, full_text?: string }[]
 }
 
 function App() {
@@ -64,44 +65,44 @@ function App() {
       const decoder = new TextDecoder()
       let done = false
       let accumulatedContent = ''
+      let sseBuffer = ''
 
       while (!done) {
         const { value, done: doneReading } = await reader.read()
         done = doneReading
-        const chunkValue = decoder.decode(value, { stream: !done })
 
-        // Process SSE formatted chunks
-        const lines = chunkValue.split('\n\n')
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6)
-            if (dataStr === '[DONE]') {
-              done = true
-              break
-            }
-            try {
-              const data = JSON.parse(dataStr)
-              if (data.content) {
-                accumulatedContent += data.content
-                setMessages(prev =>
-                  prev.map(msg =>
-                    msg.id === aiMsgId
-                      ? { ...msg, content: accumulatedContent }
-                      : msg
-                  )
-                )
-              } else if (data.sources) {
-                setMessages(prev =>
-                  prev.map(msg =>
-                    msg.id === aiMsgId
-                      ? { ...msg, sources: data.sources }
-                      : msg
-                  )
-                )
-              }
-            } catch (e) {
-              console.error('Error parsing SSE data', e)
-            }
+        sseBuffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+        const { events, remainder } = consumeSseBuffer(sseBuffer, done)
+        sseBuffer = remainder
+
+        for (const event of events) {
+          if (event.done) {
+            done = true
+            break
+          }
+
+          if (!event.payload || typeof event.payload !== 'object') {
+            continue
+          }
+
+          const payload = event.payload as { content?: string, sources?: Message['sources'] }
+          if (payload.content) {
+            accumulatedContent += payload.content
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === aiMsgId
+                  ? { ...msg, content: accumulatedContent }
+                  : msg
+              )
+            )
+          } else if (payload.sources) {
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === aiMsgId
+                  ? { ...msg, sources: payload.sources }
+                  : msg
+              )
+            )
           }
         }
       }

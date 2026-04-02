@@ -6,12 +6,12 @@ from contextlib import asynccontextmanager
 import chromadb
 from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from groq import Groq
 
-from schemas import ChatRequest, Source
+from schemas import ChatRequest, Source, TranscriptionResponse
 
 load_dotenv()
 
@@ -216,6 +216,43 @@ async def ask_question(request: ChatRequest):
     except Exception as exc:
         print(f"Error generating response: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/transcribe", response_model=TranscriptionResponse)
+async def transcribe_audio(audio: UploadFile = File(...)):
+    if groq_client is None:
+        raise HTTPException(status_code=503, detail="Speech-to-text service is not ready")
+
+    if not audio.filename:
+        raise HTTPException(status_code=400, detail="Audio filename is required")
+
+    try:
+        file_bytes = await audio.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Audio file is empty")
+
+        transcription = groq_client.audio.transcriptions.create(
+            file=(audio.filename, file_bytes),
+            model="whisper-large-v3-turbo",
+            prompt=(
+                "Transcribe Indian English legal questions accurately. "
+                "Common terms may include Companies Act, tribunal, memorandum, "
+                "articles of association, debenture, director, auditor, and compliance."
+            ),
+            response_format="json",
+            temperature=0.0,
+        )
+
+        text = (transcription.text or "").strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="No speech could be transcribed")
+
+        return TranscriptionResponse(text=text)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"Transcription error: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to transcribe audio")
 
 
 def _retrieve_matches(collection, question: str) -> dict:

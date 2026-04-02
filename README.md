@@ -19,12 +19,14 @@ The frontend focuses on delivering a sleek, minimal, and highly responsive user 
   * Features a continuous chat interface (`App.tsx` & `ChatInput.tsx`).
   * Markdown rendering is handled natively to format Legal citations and bullet points (`MessageBubble.tsx`).
   * Source Modal viewer to preview the context documents retrieved from the vector database.
+  * **Voice Input**: Integrated Speech-to-Text capability using the `MediaRecorder` API enabling users to speak their legal queries directly through the browser.
 
 ### 2. Backend (FastAPI + ChromaDB + Groq)
 The backend acts as the RAG orchestration layer. It is responsible for parsing documents, generating embeddings, executing semantic searches, and streaming LLM responses.
 * **Framework**: FastAPI (Python) for asynchronous, high-performance API routes.
 * **Vector Database**: ChromaDB (Running locally with persistent storage backing in `./chroma_db`).
 * **LLM Engine**: Llama-3-8B (via Groq API) for ultra-fast inference.
+* **Speech-to-Text**: Integrates `whisper-large-v3-turbo` via Groq API for high-accuracy parsing of legal jargon through the `/api/transcribe` endpoint.
 * **Embeddings**: `all-MiniLM-L6-v2` (via Hugging Face Sentence Transformers) for highly efficient semantic comprehension of legal text.
 
 ### 🔄 The RAG Workflow (How it works)

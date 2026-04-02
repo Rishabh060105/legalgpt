@@ -18,3 +18,6 @@ class ChatResponse(BaseModel):
     sources: List[Source]
     confidence: float
     session_id: Optional[str] = None
+
+class TranscriptionResponse(BaseModel):
+    text: str

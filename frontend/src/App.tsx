@@ -12,16 +12,18 @@ interface Message {
   sources?: { id: string, title: string, url: string, excerpt: string, full_text?: string }[]
 }
 
+type ChatMode = 'legal' | 'general'
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: 'Hello! I am LegalGPT. I can help you research legal questions, find case law, and understand statutes. How can I assist you today?'
+      content: 'Hello! I am LegalGPT. Choose Legal Mode for Indian corporate-law questions, or General Knowledge Mode for everything else.'
     }
   ])
   const [loading, setLoading] = useState(false)
-  const [useRag, setUseRag] = useState(true)
+  const [mode, setMode] = useState<ChatMode>('legal')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -45,7 +47,7 @@ function App() {
       const response = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, use_rag: useRag })
+        body: JSON.stringify({ question, mode })
       })
 
       if (!response.ok) throw new Error('Network response was not ok')
@@ -181,8 +183,8 @@ function App() {
         <ChatInput
           onSend={handleSend}
           disabled={loading}
-          useRag={useRag}
-          onToggleRag={setUseRag}
+          mode={mode}
+          onModeChange={setMode}
         />
         <p className="text-center text-[11px] text-gray-400 mt-4 font-medium tracking-wide">
           LegalGPT can make mistakes. Verify important information.

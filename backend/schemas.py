@@ -1,5 +1,6 @@
+from typing import List, Literal, Optional
+
 from pydantic import BaseModel
-from typing import List, Optional
 
 class Source(BaseModel):
     id: str
@@ -12,6 +13,7 @@ class ChatRequest(BaseModel):
     question: str
     session_id: Optional[str] = None
     use_rag: bool = True
+    mode: Literal["legal", "general"] = "legal"
 
 class ChatResponse(BaseModel):
     answer: str

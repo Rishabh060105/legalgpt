@@ -6,11 +6,11 @@ import { cn } from '../lib/utils'
 interface ChatInputProps {
     onSend: (message: string) => void
     disabled?: boolean
-    useRag: boolean
-    onToggleRag: (value: boolean) => void
+    mode: 'legal' | 'general'
+    onModeChange: (value: 'legal' | 'general') => void
 }
 
-export function ChatInput({ onSend, disabled, useRag, onToggleRag }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, mode, onModeChange }: ChatInputProps) {
     const [input, setInput] = useState('')
     const [isRecording, setIsRecording] = useState(false)
     const [isTranscribing, setIsTranscribing] = useState(false)
@@ -134,23 +134,25 @@ export function ChatInput({ onSend, disabled, useRag, onToggleRag }: ChatInputPr
         await startRecording()
     }
 
+    const isLegalMode = mode === 'legal'
+
     return (
         <form onSubmit={handleSubmit} className="relative w-full max-w-2xl mx-auto space-y-3">
             <div className="flex justify-end px-2">
                 <label className="flex items-center gap-2 cursor-pointer group">
-                    <span className={cn("text-xs font-medium transition-colors", useRag ? "text-blue-600" : "text-gray-400")}>
-                        {useRag ? "Legal Mode (RAG)" : "General Knowledge"}
+                    <span className={cn("text-xs font-medium transition-colors", isLegalMode ? "text-blue-600" : "text-gray-400")}>
+                        {isLegalMode ? "Legal Mode" : "General Knowledge Mode"}
                     </span>
                     <div
                         className={cn(
                             "w-8 h-4.5 rounded-full relative transition-colors duration-300",
-                            useRag ? "bg-blue-600" : "bg-gray-300"
+                            isLegalMode ? "bg-blue-600" : "bg-gray-300"
                         )}
-                        onClick={() => onToggleRag(!useRag)}
+                        onClick={() => onModeChange(isLegalMode ? 'general' : 'legal')}
                     >
                         <motion.div
                             className="w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 shadow-sm"
-                            animate={{ left: useRag ? "calc(100% - 1.125rem)" : "0.125rem" }}
+                            animate={{ left: isLegalMode ? "calc(100% - 1.125rem)" : "0.125rem" }}
                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
                         />
                     </div>
@@ -166,8 +168,8 @@ export function ChatInput({ onSend, disabled, useRag, onToggleRag }: ChatInputPr
                     placeholder={
                         isTranscribing
                             ? 'Transcribing your speech...'
-                            : useRag
-                                ? 'Ask a legal question...'
+                            : isLegalMode
+                                ? 'Ask an Indian corporate-law question...'
                                 : 'Ask general questions...'
                     }
                     className={cn(

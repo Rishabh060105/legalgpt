@@ -18,6 +18,16 @@ CLAUSE_PATTERN = re.compile(r"\(([a-z])\)", re.IGNORECASE)
 SUBCLAUSE_PATTERN = re.compile(r"\(([ivx]+)\)", re.IGNORECASE)
 
 
+def _build_embedding_function():
+    try:
+        return embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2",
+            local_files_only=True,
+        )
+    except Exception:
+        return embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+
+
 def clean_text(text: str) -> str:
     """Fix common PDF extraction artifacts while preserving legal structure."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -32,7 +42,8 @@ def clean_text(text: str) -> str:
 
 def parse_sections(text: str) -> list[dict]:
     """Parse top-level sections like `132. Heading`."""
-    matches = list(SECTION_PATTERN.finditer(text))
+    raw_matches = list(SECTION_PATTERN.finditer(text))
+    matches, intro_start = _trim_toc_section_matches(text, raw_matches)
     if not matches:
         return [
             {
@@ -43,7 +54,7 @@ def parse_sections(text: str) -> list[dict]:
         ]
 
     sections = []
-    intro = text[: matches[0].start()].strip()
+    intro = text[intro_start : matches[0].start()].strip()
     if intro:
         sections.append(
             {
@@ -56,11 +67,15 @@ def parse_sections(text: str) -> list[dict]:
     for index, match in enumerate(matches):
         body_start = match.end()
         body_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        title, body_text = _split_inline_section_body(
+            match.group(2).strip(),
+            text[body_start:body_end].strip(),
+        )
         sections.append(
             {
                 "section": match.group(1).upper(),
-                "title": match.group(2).strip(),
-                "text": text[body_start:body_end].strip(),
+                "title": title,
+                "text": body_text,
             }
         )
 
@@ -245,7 +260,7 @@ def ingest_documents():
     print(f"Initializing ChromaDB at {CHROMA_DB_DIR}...")
     client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
     print("Loading embedding model (all-MiniLM-L6-v2)...")
-    ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    ef = _build_embedding_function()
 
     try:
         client.delete_collection(name="legal_docs")
@@ -519,7 +534,48 @@ def _is_structural_boundary(text: str, index: int) -> bool:
         return True
 
     previous_char = prefix[-1]
-    return previous_char in {"\n", ":", ";", "-", ".", "(", "["}
+    return previous_char in {"\n", ":", ";", "-", ".", "(", "[", "—", "–"}
+
+
+def _trim_toc_section_matches(text: str, matches: list[re.Match]) -> tuple[list[re.Match], int]:
+    """Drop table-of-contents matches when section numbering restarts in the full document."""
+    if not matches:
+        return [], 0
+
+    start_index = 0
+    previous_key = _section_match_sort_key(matches[0])
+    for index, match in enumerate(matches[1:], start=1):
+        current_key = _section_match_sort_key(match)
+        if current_key < previous_key:
+            start_index = index
+            break
+        previous_key = current_key
+
+    intro_start = matches[start_index - 1].end() if start_index > 0 else 0
+    return matches[start_index:], intro_start
+
+
+def _section_match_sort_key(match: re.Match) -> tuple[int, tuple[int, ...], str]:
+    value = match.group(1).upper()
+    number_match = re.fullmatch(r"(\d+)([A-Z]*)", value)
+    if not number_match:
+        return (-1, (), value)
+
+    number = int(number_match.group(1))
+    suffix = number_match.group(2)
+    suffix_key = tuple(ord(character) - ord("A") + 1 for character in suffix)
+    return (number, suffix_key, value)
+
+
+def _split_inline_section_body(title: str, body_text: str) -> tuple[str, str]:
+    inline_body_match = re.search(r"^(.*?)[\-\u2013\u2014]\s*(\(\d+\).*)$", title)
+    if not inline_body_match:
+        return title, body_text
+
+    clean_title = inline_body_match.group(1).rstrip(" -–—:")
+    inline_body = inline_body_match.group(2).strip()
+    combined_body = _join_text_parts(inline_body, body_text)
+    return clean_title, combined_body
 
 
 def _build_citation_path(chunk: dict) -> str:

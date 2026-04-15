@@ -2,10 +2,12 @@ import json
 import os
 import sys
 import unittest
+import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import main
+from schemas import ChatRequest
 
 
 def _where_key(where):
@@ -54,6 +56,81 @@ class FakeCollection:
 
 
 class CoreFlowTests(unittest.TestCase):
+    def test_indian_corporate_scope_classifier_accepts_corporate_queries(self):
+        self.assertTrue(main._is_indian_corporate_law_question("What does Section 149 of the Companies Act, 2013 say?"))
+        self.assertTrue(main._is_indian_corporate_law_question("How many board meetings must a private limited company hold?"))
+
+    def test_indian_corporate_scope_classifier_rejects_non_corporate_legal_queries(self):
+        self.assertFalse(main._is_indian_corporate_law_question("Legal age of consent in Karnataka"))
+        self.assertFalse(main._is_indian_corporate_law_question("What is the punishment for theft?"))
+
+    def test_prepare_chat_route_returns_boundary_for_out_of_scope_legal_mode(self):
+        route = main._prepare_chat_route(
+            ChatRequest(question="Legal age of consent in Karnataka", mode="legal"),
+            None,
+        )
+
+        self.assertEqual(route["boundary_response"], main.LEGAL_MODE_BOUNDARY_MESSAGE)
+        self.assertEqual(route["sources"], [])
+
+    def test_prepare_chat_route_rejects_unsupported_legal_question_when_context_is_missing(self):
+        route = main._prepare_chat_route(
+            ChatRequest(question="Explain Section 149 of the Companies Act, 2013", mode="legal"),
+            FakeCollection(),
+        )
+
+        self.assertEqual(
+            route["boundary_response"],
+            "This question is within Legal Mode, but it is not supported by the available legal knowledge base.",
+        )
+
+    def test_prepare_chat_route_reports_unavailable_when_collection_is_missing(self):
+        route = main._prepare_chat_route(
+            ChatRequest(question="Explain Section 149 of the Companies Act, 2013", mode="legal"),
+            None,
+        )
+
+        self.assertEqual(route["boundary_response"], main.LEGAL_KB_UNAVAILABLE_MESSAGE)
+
+    def test_prepare_chat_route_reports_unavailable_when_retrieval_fails(self):
+        class ExplodingCollection:
+            def get(self, **kwargs):
+                raise RuntimeError("db get blew up")
+
+            def query(self, **kwargs):
+                raise RuntimeError("db query blew up")
+
+        route = main._prepare_chat_route(
+            ChatRequest(question="Explain Section 149 of the Companies Act, 2013", mode="legal"),
+            ExplodingCollection(),
+        )
+
+        self.assertEqual(route["boundary_response"], main.LEGAL_KB_UNAVAILABLE_MESSAGE)
+        self.assertEqual(route["sources"], [])
+
+    def test_prepare_chat_route_uses_general_prompt_for_general_mode(self):
+        route = main._prepare_chat_route(
+            ChatRequest(question="Legal age of consent in Karnataka", mode="general"),
+            None,
+        )
+
+        self.assertIsNone(route["boundary_response"])
+        self.assertIn("General Knowledge Mode", route["system_prompt"])
+
+    def test_health_check_reports_error_when_chroma_is_missing(self):
+        original_groq = main.groq_client
+        original_chroma = main.chroma_collection
+        try:
+            main.groq_client = object()
+            main.chroma_collection = None
+            response = asyncio.run(main.health_check())
+        finally:
+            main.groq_client = original_groq
+            main.chroma_collection = original_chroma
+
+        self.assertEqual(response["status"], "error")
+        self.assertIn("ChromaDB not loaded", response["message"])
+
     def test_extract_citation_reference_supports_alphanumeric_sections(self):
         reference = main._extract_citation_reference("Explain Section 76A(2)(a)")
 

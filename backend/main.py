@@ -56,6 +56,88 @@ STATUTE_QUERY_KEYWORDS = (
 )
 
 PRECEDENT_DOCUMENT_KEYWORDS = ("precedent", "judgment", "judgement", "ruling", "case")
+LEGAL_MODE_BOUNDARY_MESSAGE = (
+    "This question is outside the scope of Legal Mode, which only covers Indian Corporate Law "
+    "and related corporate compliance topics."
+)
+LEGAL_KB_UNAVAILABLE_MESSAGE = (
+    "The legal knowledge base is temporarily unavailable, so I can't verify this answer right now."
+)
+LEGAL_SCOPE_KEYWORDS = (
+    "companies act",
+    "corporate law",
+    "company law",
+    "llp",
+    "limited liability partnership",
+    "incorporation",
+    "director",
+    "directors",
+    "board meeting",
+    "board meetings",
+    "shareholder",
+    "shareholders",
+    "resolution",
+    "resolutions",
+    "corporate governance",
+    "merger",
+    "mergers",
+    "acquisition",
+    "acquisitions",
+    "restructuring",
+    "insolvency",
+    "liquidation",
+    "sebi",
+    "listed company",
+    "listed companies",
+    "compliance",
+    "roc filing",
+    "roc filings",
+    "mca filing",
+    "mca filings",
+    "corporate contract",
+    "corporate contracts",
+    "corporate liability",
+    "debenture",
+    "debentures",
+    "auditor",
+    "auditors",
+    "memorandum of association",
+    "articles of association",
+    "one person company",
+    "opc",
+    "private limited",
+    "public company",
+    "nclt",
+    "ibc",
+)
+OUT_OF_SCOPE_LEGAL_KEYWORDS = (
+    "consent",
+    "theft",
+    "divorce",
+    "accident",
+    "criminal",
+    "family law",
+    "constitutional",
+    "bail",
+    "fir",
+    "murder",
+    "rape",
+    "cheque bounce",
+    "property dispute",
+    "marriage",
+    "domestic violence",
+    "inheritance",
+    "succession",
+    "custody",
+    "tenant",
+    "landlord",
+    "consumer complaint",
+    "labour law",
+    "employment rights",
+    "wages",
+    "medical negligence",
+    "traffic challan",
+)
 RELEVANCE_STOPWORDS = frozenset(
     {
         "a",
@@ -95,6 +177,16 @@ RELEVANCE_STOPWORDS = frozenset(
 )
 
 
+def _build_embedding_function():
+    try:
+        return embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2",
+            local_files_only=True,
+        )
+    except Exception:
+        return embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global groq_client, chroma_collection
@@ -114,7 +206,7 @@ async def lifespan(app: FastAPI):
         chroma_db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
         if os.path.exists(chroma_db_dir):
             client = chromadb.PersistentClient(path=chroma_db_dir)
-            ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+            ef = _build_embedding_function()
             chroma_collection = client.get_collection(name="legal_docs", embedding_function=ef)
             print("ChromaDB collection loaded successfully!")
         else:
@@ -146,15 +238,16 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health_check():
-    status = "ok"
-    message = "LegalGPT API (Groq + RAG) is ready"
+    issues = []
     if groq_client is None:
-        status = "error"
-        message = "Groq client not initialized"
+        issues.append("Groq client not initialized")
     if chroma_collection is None:
-        message += " (ChromaDB not loaded)"
+        issues.append("ChromaDB not loaded")
 
-    return {"status": status, "message": message}
+    if issues:
+        return {"status": "error", "message": "; ".join(issues)}
+
+    return {"status": "ok", "message": "LegalGPT API (Groq + RAG) is ready"}
 
 
 @app.post("/api/ask")
@@ -163,36 +256,26 @@ async def ask_question(request: ChatRequest):
         raise HTTPException(status_code=503, detail="LLM service is not ready")
 
     try:
-        context_text = ""
-        sources = []
-
         question = request.question.strip()
-        if request.use_rag and len(question) > 10 and question.lower() not in {"hi", "hello", "hey"}:
-            if chroma_collection:
-                try:
-                    retrieval = _retrieve_matches(chroma_collection, question)
-                    context_text = _build_context_text(retrieval["context_matches"])
-                    sources = _build_sources(retrieval["source_matches"])
-                except Exception as exc:
-                    print(f"RAG Error: {exc}")
+        if not question:
+            raise HTTPException(status_code=400, detail="Question is required")
 
-        system_prompt = """You are a helpful legal assistant specialized in Indian Corporate Law.
-        Use the provided context to answer the user's question accurately.
-        If the context doesn't contain the answer, rely on your general knowledge but mention that this is general information.
-        Always cite the section number or source document if available in the context."""
-
-        if context_text:
-            system_prompt += f"\n\nContext:\n{context_text}"
+        route = _prepare_chat_route(request, chroma_collection)
 
         async def generate():
             try:
-                if sources:
-                    yield f"data: {json.dumps({'sources': [source.model_dump() for source in sources]})}\n\n"
+                if route["boundary_response"]:
+                    yield f"data: {json.dumps({'content': route['boundary_response']})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+
+                if route["sources"]:
+                    yield f"data: {json.dumps({'sources': [source.model_dump() for source in route['sources']]})}\n\n"
 
                 stream = groq_client.chat.completions.create(
                     messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": request.question},
+                        {"role": "system", "content": route["system_prompt"]},
+                        {"role": "user", "content": question},
                     ],
                     model="llama-3.3-70b-versatile",
                     temperature=0.3,
@@ -289,6 +372,91 @@ def _retrieve_matches(collection, question: str) -> dict:
         "context_matches": limited_matches,
         "source_matches": limited_matches,
     }
+
+
+def _prepare_chat_route(request: ChatRequest, collection) -> dict:
+    question = request.question.strip()
+    mode = request.mode.lower()
+    boundary_response = None
+    context_text = ""
+    sources = []
+
+    if mode == "legal":
+        if not _is_indian_corporate_law_question(question):
+            boundary_response = LEGAL_MODE_BOUNDARY_MESSAGE
+        elif collection is None:
+            boundary_response = LEGAL_KB_UNAVAILABLE_MESSAGE
+        elif len(question) > 10 and question.lower() not in {"hi", "hello", "hey"}:
+            try:
+                retrieval = _retrieve_matches(collection, question)
+                context_text = _build_context_text(retrieval["context_matches"])
+                sources = _build_sources(retrieval["source_matches"])
+            except Exception as exc:
+                print(f"RAG Error: {exc}")
+                boundary_response = LEGAL_KB_UNAVAILABLE_MESSAGE
+
+            if not boundary_response and not context_text:
+                boundary_response = (
+                    "This question is within Legal Mode, but it is not supported by the available "
+                    "legal knowledge base."
+                )
+
+        return {
+            "mode": mode,
+            "boundary_response": boundary_response,
+            "sources": sources,
+            "system_prompt": _build_legal_mode_prompt(context_text),
+        }
+
+    return {
+        "mode": mode,
+        "boundary_response": None,
+        "sources": [],
+        "system_prompt": _build_general_mode_prompt(),
+    }
+
+
+def _build_legal_mode_prompt(context_text: str) -> str:
+    prompt = (
+        "You are operating in Legal Mode.\n"
+        "Answer only questions that are directly within the scope of Indian Corporate Law and closely related "
+        "corporate compliance topics.\n"
+        "Use only the provided legal context.\n"
+        "If the answer is not clearly supported by the provided context, say that the question is outside the "
+        "available legal context or not supported by the legal knowledge base.\n"
+        "Do not rely on outside general knowledge.\n"
+        "Keep the response concise, professional, and boundary-aware."
+    )
+    if context_text:
+        prompt += f"\n\nContext:\n{context_text}"
+    return prompt
+
+
+def _build_general_mode_prompt() -> str:
+    return (
+        "You are operating in General Knowledge Mode.\n"
+        "Provide a direct, helpful, factual response.\n"
+        "If the question is legal but not corporate-law-specific, answer in a general knowledge style only.\n"
+        "If the information is uncertain, varies by jurisdiction, or should not be treated as formal legal advice, "
+        "say so clearly.\n"
+        "Keep the tone neutral, clear, and informative."
+    )
+
+
+def _is_indian_corporate_law_question(question: str) -> bool:
+    normalized_question = question.lower()
+
+    if any(keyword in normalized_question for keyword in OUT_OF_SCOPE_LEGAL_KEYWORDS):
+        return False
+
+    if any(keyword in normalized_question for keyword in LEGAL_SCOPE_KEYWORDS):
+        return True
+
+    citation_reference = _extract_citation_reference(question)
+    if citation_reference:
+        return True
+
+    return False
 
 
 def _extract_citation_reference(question: str) -> dict | None:
@@ -612,9 +780,9 @@ def _expand_search_query(question: str) -> str:
 
 def _exact_sort_key(match: dict) -> tuple:
     return (
-        _metadata_sort_key(match["metadata"]),
         1 if _is_low_signal_match(match) else 0,
         -_content_quality_score(match),
+        _metadata_sort_key(match["metadata"]),
         -len(_compact_text(match["document"])),
     )
 
